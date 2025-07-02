@@ -162,11 +162,11 @@ async function showConfusion(model, data) {
 const initDrawingCanvas = () => {
   const canvas = document.getElementById('drawing-canvas');
   const ctx = canvas.getContext('2d');
-  
+
   // Set white background
   ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  
+
   ctx.lineWidth = 10;
   ctx.lineCap = 'round';
   ctx.strokeStyle = '#000000';
@@ -201,10 +201,20 @@ function clearCanvas() {
   const canvas = document.getElementById('drawing-canvas');
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  
+
   // Reset white background
   ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+const statusMap = {
+  STATUS_READY: 'Draw a digit in the box below and click "Predict" to see the model\'s prediction.',
+  STATUS_LOADING: 'Loading data...',
+  STATUS_TRAINING: 'Training the model...',
+}
+
+function setStatus(status) {
+  document.getElementById('status-text').innerText = statusMap[status];
 }
 
 function visualizePreprocessedInput(inputTensor) {
@@ -215,24 +225,24 @@ function visualizePreprocessedInput(inputTensor) {
 function predictDrawing(model) {
   const canvas = document.getElementById('drawing-canvas');
   const ctx = canvas.getContext('2d');
-  
+
   const inputTensor = tf.tidy(() => {
     // Convert canvas to tensor (grayscale)
     let img = tf.browser.fromPixels(canvas, 1);
-    
+
     // Resize to 28x28 pixels
     img = tf.image.resizeBilinear(img, [28, 28]);
-    
+
     // Normalize to [0, 1] range first
     img = img.div(255.0);
-    
+
     // Invert colors (canvas is black on white, MNIST is white on black)
     // For normalized values: 1 - pixel_value
     img = tf.scalar(1.0).sub(img);
-    
+
     // Add batch dimension to get [1, 28, 28, 1]
     img = img.expandDims(0);
-    
+
     return img;
   });
 
@@ -240,7 +250,7 @@ function predictDrawing(model) {
   const predictedClass = prediction.argMax(-1).dataSync()[0];
   const confidence = tf.max(prediction).dataSync()[0];
 
-  document.getElementById('prediction-result').innerText = 
+  document.getElementById('prediction-result').innerText =
     `Predicted Class: ${classNames[predictedClass]} (Confidence: ${(confidence * 100).toFixed(1)}%)`;
 
   visualizePreprocessedInput(inputTensor);
@@ -251,29 +261,42 @@ async function trainNewModel(data) {
   const model = getNewModel();
   await train(model, data);
   await model.save('localstorage://handwritten-numbers-model');
+
+  return model;
 }
 
 async function run() {
+
   const data = new MnistData();
   await data.load();
   await showExamples(data);
+  let model;
 
-  let model  = localStorage.getItem("tensorflowjs_models/handwritten-numbers-model/info");
+  const savedModel  = localStorage.getItem("tensorflowjs_models/handwritten-numbers-model/info");
 
-  if (model) {
+  if (savedModel) {
+    setStatus('STATUS_LOADING');
     model = await tf.loadLayersModel('localstorage://handwritten-numbers-model');
   } else {
-    await trainNewModel(data);
+    setStatus('STATUS_TRAINING');
+    model = await trainNewModel(data);
   }
 
   initDrawingCanvas();
   document.getElementById('predict-button').addEventListener('click', () => predictDrawing(model));
-  document.getElementById('retrain-button').addEventListener('click', () => trainNewModel(data));
+  document.getElementById('retrain-button').addEventListener('click', async () => {
+    setStatus('STATUS_TRAINING');
+    model = await trainNewModel(data);
+    setStatus('STATUS_READY');
+  });
 
   tfvis.show.modelSummary({name: 'Model Architecture', tab: 'Model'}, model);
   await showAccuracy(model, data);
   await showConfusion(model, data);
+  setStatus('STATUS_READY');
 }
+
+
 
 document.addEventListener('DOMContentLoaded', run);
 
